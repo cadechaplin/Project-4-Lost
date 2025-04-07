@@ -17,10 +17,25 @@ export async function loadLeaflet() {
 
     // Fix marker icon issue with webpack
     delete L.Icon.Default.prototype._getIconUrl;
+
+    // Use dynamic imports
+    const iconRetinaUrl = new URL(
+      "leaflet/dist/images/marker-icon-2x.png",
+      import.meta.url
+    ).href;
+    const iconUrl = new URL(
+      "leaflet/dist/images/marker-icon.png",
+      import.meta.url
+    ).href;
+    const shadowUrl = new URL(
+      "leaflet/dist/images/marker-shadow.png",
+      import.meta.url
+    ).href;
+
     L.Icon.Default.mergeOptions({
-      iconRetinaUrl: require("leaflet/dist/images/marker-icon-2x.png"),
-      iconUrl: require("leaflet/dist/images/marker-icon.png"),
-      shadowUrl: require("leaflet/dist/images/marker-shadow.png"),
+      iconRetinaUrl,
+      iconUrl,
+      shadowUrl,
     });
 
     return L;
