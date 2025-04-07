@@ -359,12 +359,36 @@ export default {
           throw new Error("Invalid OSRM response");
         }
 
-        // Calculate A* route for the red dashed line
+        // Create a smaller, more focused bounding box for A*
+        // This will make the A* algorithm run much faster
+        const padding = 0.005; // About 500 meters of padding
+        const smallerBounds = {
+          south: Math.min(startPoint.value.lat, endPoint.value.lat) - padding,
+          north: Math.max(startPoint.value.lat, endPoint.value.lat) + padding,
+          west: Math.min(startPoint.value.lng, endPoint.value.lng) - padding,
+          east: Math.max(startPoint.value.lng, endPoint.value.lng) + padding,
+        };
+
+        // Ensure we don't go outside Seattle bounds
+        smallerBounds.south = Math.max(
+          smallerBounds.south,
+          SEATTLE_BOUNDS.south
+        );
+        smallerBounds.north = Math.min(
+          smallerBounds.north,
+          SEATTLE_BOUNDS.north
+        );
+        smallerBounds.west = Math.max(smallerBounds.west, SEATTLE_BOUNDS.west);
+        smallerBounds.east = Math.min(smallerBounds.east, SEATTLE_BOUNDS.east);
+
+        console.log("Using smaller bounds for A*:", smallerBounds);
+
+        // Calculate A* route using the smaller bounds
         console.log("Calculating A* route...");
         const aStarResult = await calculateAStarPath(
           startPoint.value,
           endPoint.value,
-          SEATTLE_BOUNDS
+          smallerBounds
         );
         console.log("A* result received:", aStarResult);
 
