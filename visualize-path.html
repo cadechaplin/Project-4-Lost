@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Path Visualization</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <style>
+      #map {
+        height: 800px;
+        width: 100%;
+      }
+      .info-panel {
+        padding: 10px;
+        background: white;
+        border-radius: 5px;
+        box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+        margin-bottom: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="info-panel">
+      <h3>A* Path Visualization</h3>
+      <p>Blue line: A* path (71 points)</p>
+      <p>Start point: 47.608246, -122.332303 (Seattle downtown)</p>
+      <p>End point: 47.603501, -122.322514 (Space Needle)</p>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+      // Create the map centered on the path
+      const map = L.map("map").setView([47.606, -122.328], 15);
+
+      // Add the base map layer (OpenStreetMap)
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution:
+          '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>',
+      }).addTo(map);
+
+      // A* path points from your console output
+      const pathPoints = [
+        [47.60821, -122.33255],
+        [47.60802, -122.33299],
+        [47.60797, -122.33311],
+        [47.60791, -122.33305],
+        [47.60757, -122.33274],
+        [47.60738, -122.33257],
+        [47.60727, -122.33247],
+        [47.6072, -122.3324],
+        [47.607, -122.33222],
+        [47.60663, -122.33189],
+        [47.60655, -122.33182],
+        [47.60648, -122.33176],
+        [47.60628, -122.33158],
+        [47.60591, -122.33124],
+        [47.60586, -122.3312],
+        [47.60584, -122.33118],
+        [47.60589, -122.33107],
+        [47.60608, -122.33061],
+        [47.60626, -122.33019],
+        [47.60627, -122.33016],
+        [47.60628, -122.33013],
+        [47.60628, -122.3301],
+        [47.60628, -122.33008],
+        [47.60628, -122.33004],
+        [47.60628, -122.33002],
+        [47.60628, -122.33001],
+        [47.60627, -122.32998],
+        [47.60626, -122.32995],
+        [47.60625, -122.32993],
+        [47.60623, -122.3299],
+        [47.60621, -122.32987],
+        [47.60619, -122.32985],
+        [47.60577, -122.32946],
+        [47.60563, -122.32934],
+        [47.60535, -122.32909],
+        [47.60532, -122.32906],
+        [47.60518, -122.32894],
+        [47.60498, -122.32876],
+        [47.6049, -122.32869],
+        [47.60494, -122.32859],
+        [47.60516, -122.32806],
+        [47.6053, -122.32773],
+        [47.60536, -122.3276],
+        [47.60539, -122.32752],
+        [47.60558, -122.32706],
+        [47.60578, -122.32659],
+        [47.60583, -122.32648],
+        [47.60586, -122.32641],
+        [47.60603, -122.326],
+        [47.60625, -122.32548],
+        [47.60629, -122.32538],
+        [47.60623, -122.32532],
+        [47.60614, -122.32523],
+        [47.60601, -122.32511],
+        [47.60595, -122.32505],
+        [47.60567, -122.32479],
+        [47.60559, -122.32471],
+        [47.60551, -122.32464],
+        [47.60527, -122.32442],
+        [47.60505, -122.32422],
+        [47.60496, -122.32414],
+        [47.60489, -122.32407],
+        [47.60482, -122.324],
+        [47.60462, -122.32382],
+        [47.60451, -122.32372],
+        [47.60418, -122.32341],
+        [47.60405, -122.32329],
+        [47.60364, -122.32291],
+        [47.60354, -122.32281],
+        [47.60347, -122.32274],
+        [47.60351, -122.32265],
+      ];
+
+      // Original start and end points from your test data
+      const startPoint = { lat: 47.608246, lng: -122.332303 }; // Seattle downtown
+      const endPoint = { lat: 47.603501, lng: -122.322514 }; // Space Needle
+
+      // Draw the A* path
+      const pathLine = L.polyline(pathPoints, {
+        color: "blue",
+        weight: 5,
+        opacity: 0.7,
+      }).addTo(map);
+
+      // Add markers for start and end points
+      L.marker([startPoint.lat, startPoint.lng])
+        .addTo(map)
+        .bindPopup("Start Point");
+
+      L.marker([endPoint.lat, endPoint.lng]).addTo(map).bindPopup("End Point");
+    </script>
+  </body>
+</html>

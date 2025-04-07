@@ -59,12 +59,28 @@ export function addMarkerToMap(map, position, title) {
   return marker;
 }
 
-export function addPolylineToMap(map, points, options) {
-  if (!L || !map || points.length < 2) return null;
+export function addPolylineToMap(map, points, options = {}) {
+  if (!map || !points || points.length < 2) {
+    console.error("Invalid map or insufficient points for polyline");
+    return null;
+  }
 
-  const latlngs = points.map((point) => [point.lat, point.lng]);
-  const polyline = L.polyline(latlngs, options);
-  polyline.addTo(map);
+  try {
+    // Convert points to the format Leaflet expects
+    const latLngs = points.map((point) => [point.lat, point.lng]);
 
-  return polyline;
+    // Create and add polyline
+    const polyline = L.polyline(latLngs, {
+      color: options.color || "#3388ff",
+      weight: options.weight || 3,
+      opacity: options.opacity !== undefined ? options.opacity : 1.0,
+      dashArray: options.dashArray,
+    });
+
+    polyline.addTo(map);
+    return polyline;
+  } catch (error) {
+    console.error("Error adding polyline to map:", error);
+    return null;
+  }
 }

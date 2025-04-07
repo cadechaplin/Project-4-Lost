@@ -238,8 +238,9 @@ export default {
       leafletPolylines.value.forEach((polyline) => polyline.remove());
       leafletPolylines.value = [];
 
-      // Add OSRM route polyline
+      // Add OSRM route polyline (blue solid line)
       if (path.value.length > 0) {
+        console.log("Drawing OSRM path with", path.value.length, "points");
         const osmPath = addPolylineToMap(map.value, path.value, {
           color: "#4285F4",
           weight: 5,
@@ -247,17 +248,23 @@ export default {
         });
 
         if (osmPath) {
+          console.log("OSRM polyline added to map");
           leafletPolylines.value.push(osmPath);
 
           // Fit map to the route bounds
           map.value.fitBounds(osmPath.getBounds(), {
             padding: [50, 50],
           });
+        } else {
+          console.error("Failed to add OSRM polyline to map");
         }
+      } else {
+        console.warn("No OSRM path points to display");
       }
 
-      // Add A* route polyline with dashed pattern
+      // Add A* route polyline (red dashed line)
       if (aStarPath.value.length > 0) {
+        console.log("Drawing A* path with", aStarPath.value.length, "points");
         const aStarPolyline = addPolylineToMap(map.value, aStarPath.value, {
           color: "#EA4335",
           weight: 5,
@@ -266,8 +273,18 @@ export default {
         });
 
         if (aStarPolyline) {
+          console.log("A* polyline added to map");
           leafletPolylines.value.push(aStarPolyline);
+        } else {
+          console.error("Failed to add A* polyline to map");
         }
+      } else {
+        console.warn("No A* path points to display");
+      }
+
+      // Make sure the polylines are rendered properly
+      if (map.value) {
+        map.value.invalidateSize();
       }
     }
 
@@ -318,104 +335,68 @@ export default {
       clearLeafletMarkers(); // Clear previous markers
 
       try {
-        // Get OSRM route
+        console.log(
+          "Calculating routes between:",
+          startPoint.value,
+          endPoint.value
+        );
+
+        // Get OSRM route for the blue line
+        console.log("Fetching OSRM route...");
         const osrmRoute = await getOpenStreetMapDirections(
           startPoint.value,
           endPoint.value
         );
-        path.value = decodePolyline(
-          osrmRoute.routes[0].overview_polyline.points
-        );
+        console.log("OSRM route received:", osrmRoute);
 
-        // Calculate bounds correctly, expanding by 0.03 degrees in each direction
-        const bounds = {
-          south: Math.min(startPoint.value.lat, endPoint.value.lat) - 0.03,
-          north: Math.max(startPoint.value.lat, endPoint.value.lat) + 0.03,
-          west: Math.min(startPoint.value.lng, endPoint.value.lng) - 0.03,
-          east: Math.max(startPoint.value.lng, endPoint.value.lng) + 0.03,
-        };
+        if (osrmRoute && osrmRoute.routes && osrmRoute.routes[0]) {
+          path.value = decodePolyline(
+            osrmRoute.routes[0].overview_polyline.points
+          );
+          console.log("OSRM path decoded, points:", path.value.length);
+        } else {
+          console.error("Invalid OSRM response format:", osrmRoute);
+          throw new Error("Invalid OSRM response");
+        }
 
-        console.log("Using bounds for A* calculation:", bounds);
-
-        // Calculate A* route with proper bounds
-        console.log("Starting point:", startPoint.value);
-        console.log("End point:", endPoint.value);
+        // Calculate A* route for the red dashed line
+        console.log("Calculating A* route...");
         const aStarResult = await calculateAStarPath(
           startPoint.value,
           endPoint.value,
           SEATTLE_BOUNDS
         );
+        console.log("A* result received:", aStarResult);
 
-        console.log("A* result:", aStarResult);
-
-        console.log(`Nodes Explored: ${aStarResult.routes[0].nodesExplored}`);
-
-        // Handle the result based on its format
-        if (aStarResult.routes && aStarResult.routes[0]) {
-          // New OSRM format
+        if (aStarResult && aStarResult.routes && aStarResult.routes[0]) {
           aStarPath.value = decodePolyline(
             aStarResult.routes[0].overview_polyline.points
           );
-
-          routeInfo.value = {
-            osmDistance: osrmRoute.routes[0].legs[0].distance.text,
-            osmDuration: osrmRoute.routes[0].legs[0].duration.text,
-            aStarDistance: aStarResult.routes[0].legs[0].distance.text,
-            nodesExplored: aStarResult.routes[0].nodesExplored || 0,
-          };
-
-          // If the result contains explored nodes, show them on the map
-          if (aStarResult.routes[0].exploredNodesList) {
-            showExploredNodes(aStarResult.routes[0].exploredNodesList);
-          }
+          console.log("A* path decoded, points:", aStarPath.value.length);
         } else {
-          // Legacy format (fallback)
-          aStarPath.value = aStarResult.path || [];
-
-          routeInfo.value = {
-            osmDistance: osrmRoute.routes[0].legs[0].distance.text,
-            osmDuration: osrmRoute.routes[0].legs[0].duration.text,
-            aStarDistance: `${(aStarResult.distance / 1000).toFixed(2)} km`,
-            nodesExplored: aStarResult.nodesExplored || 0,
-          };
-
-          // If the result contains explored nodes, show them on the map
-          if (aStarResult.exploredNodesList) {
-            showExploredNodes(aStarResult.exploredNodesList);
-          }
+          console.error("Invalid A* response format:", aStarResult);
+          // Fall back to OSRM route for A* path if A* fails
+          aStarPath.value = [...path.value];
         }
 
-        console.log("A* Path points:", aStarPath.value.length);
-        console.log("Nodes explored:", routeInfo.value.nodesExplored);
+        // Set up route information panel
+        routeInfo.value = {
+          osmDistance: osrmRoute.routes[0].legs[0].distance.text,
+          osmDuration: osrmRoute.routes[0].legs[0].duration.text,
+          aStarDistance:
+            aStarResult?.routes?.[0]?.legs?.[0]?.distance?.text || "N/A",
+          nodesExplored: aStarResult?.routes?.[0]?.nodesExplored || 0,
+        };
+
+        // Force update of paths
+        await nextTick();
+        updatePaths();
       } catch (error) {
-        console.error("Error calculating route:", error);
-        alert(`Failed to calculate route: ${error.message || "Unknown error"}`);
+        console.error("Error calculating routes:", error);
+        alert("Error calculating routes. Please try again.");
       } finally {
         isLoading.value = false;
       }
-    }
-
-    // Function to show explored nodes on the map
-    function showExploredNodes(nodes) {
-      if (!nodes || !map.value) return;
-
-      console.log(`Showing ${nodes.length} explored nodes on the map`);
-
-      // Add markers for explored nodes
-      nodes.forEach((node) => {
-        const marker = L.value
-          .circleMarker([node.lat, node.lng], {
-            radius: 2,
-            fillColor: "#ff7800",
-            color: "#000",
-            weight: 1,
-            opacity: 0.5,
-            fillOpacity: 0.5,
-          })
-          .addTo(map.value);
-
-        leafletMarkers.value.push(marker);
-      });
     }
 
     // Function to clear all leaflet markers

@@ -75,3 +75,55 @@ async function testRoutingService() {
 }
 
 testRoutingService();
+
+async function showExploredNodes(exploredNodesList) {
+  const aStarResult = await calculateAStarPath(
+    startPoint.value,
+    endPoint.value,
+    SEATTLE_BOUNDS
+  );
+
+  console.log("A* result:", aStarResult);
+
+  console.log(`Nodes Explored: ${aStarResult.routes[0].nodesExplored}`);
+
+  // Handle the result based on its format
+  if (aStarResult.routes && aStarResult.routes[0]) {
+    // New OSRM format
+    aStarPath.value = decodePolyline(
+      aStarResult.routes[0].overview_polyline.points
+    );
+
+    routeInfo.value = {
+      osmDistance: osrmRoute.routes[0].legs[0].distance.text,
+      osmDuration: osrmRoute.routes[0].legs[0].duration.text,
+      aStarDistance: aStarResult.routes[0].legs[0].distance.text,
+      nodesExplored: aStarResult.routes[0].nodesExplored || 0,
+    };
+
+    // If the result contains explored nodes, show them on the map
+    if (aStarResult.routes[0].exploredNodesList) {
+      showExploredNodes(aStarResult.routes[0].exploredNodesList);
+    }
+  } else {
+    // Legacy format (fallback)
+    aStarPath.value = aStarResult.path || [];
+
+    routeInfo.value = {
+      osmDistance: osrmRoute.routes[0].legs[0].distance.text,
+      osmDuration: osrmRoute.routes[0].legs[0].duration.text,
+      aStarDistance: `${(aStarResult.distance / 1000).toFixed(2)} km`,
+      nodesExplored: aStarResult.nodesExplored || 0,
+    };
+
+    // If the result contains explored nodes, show them on the map
+    if (aStarResult.exploredNodesList) {
+      showExploredNodes(aStarResult.exploredNodesList);
+    }
+  }
+
+  console.log("A* Path points:", aStarPath.value.length);
+  console.log("Nodes explored:", routeInfo.value.nodesExplored);
+}
+
+//showExploredNodes();
