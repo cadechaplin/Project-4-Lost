@@ -51,8 +51,7 @@
 
         <div>
           <PointSelector
-            :startPoint="startPoint"
-            :endPoint="endPoint"
+            :points="points"
             :isLoading="isLoading"
             @calculate="calculateRoute"
             @reset="resetPoints"
@@ -95,8 +94,7 @@ export default {
     const loadingStatus = ref("Initializing...");
     const L = ref(null);
 
-    const startPoint = ref(null);
-    const endPoint = ref(null);
+    const points = ref([])
     const markers = ref([]);
     const path = ref([]);
     const aStarPath = ref([]);
@@ -305,21 +303,17 @@ export default {
         return;
       }
 
-      if (!startPoint.value) {
-        startPoint.value = point;
-        markers.value = [{ position: point, title: "Start" }];
-      } else if (!endPoint.value) {
-        endPoint.value = point;
-        markers.value = [
-          { position: startPoint.value, title: "Start" },
-          { position: endPoint.value, title: "End" },
-        ];
-      }
+      const index = points.value.length;
+    points.value.push(point);
+
+    markers.value = points.value.map((pt, i) => ({
+      position: pt,
+      title: `Point ${i + 1}`,
+    }));
     }
 
     function resetPoints() {
-      startPoint.value = null;
-      endPoint.value = null;
+      points.value = [];
       markers.value = [];
       path.value = [];
       aStarPath.value = [];
@@ -327,100 +321,78 @@ export default {
     }
 
     async function calculateRoute() {
-      if (!startPoint.value || !endPoint.value) return;
+      if (points.value.length < 2) {
+        alert("Select at least two points.");
+        return;
+      }
 
       isLoading.value = true;
       path.value = [];
       aStarPath.value = [];
+      routeInfo.value = null;
       clearLeafletMarkers(); // Clear previous markers
 
       try {
-        console.log(
-          "Calculating routes between:",
-          startPoint.value,
-          endPoint.value
-        );
+        let totalOSMDistance = 0;
+        let totalOSMDuration = 0;
+        let totalAStarDistance = 0;
+        let totalNodesExplored = 0;
+
+        for (let i = 0; i < points.value.length - 1; i++) {
+          const from = points.value[i];
+          const to = points.value[i + 1];
+
+          console.log(`Calculating route from point ${i + 1} to point ${i + 2}`);
 
         // Get OSRM route for the blue line
-        console.log("Fetching OSRM route...");
-        const osrmRoute = await getOpenStreetMapDirections(
-          startPoint.value,
-          endPoint.value
-        );
-        console.log("OSRM route received:", osrmRoute);
+        const osrmSegment = await getOpenStreetMapDirections(from, to);
+        if (osrmSegment?.routes?.[0]) {
+          const segment = osrmSegment.routes[0];
+          const segmentPath = decodePolyline(segment.overview_polyline.points);
+          path.value.push(...segmentPath);
 
-        if (osrmRoute && osrmRoute.routes && osrmRoute.routes[0]) {
-          path.value = decodePolyline(
-            osrmRoute.routes[0].overview_polyline.points
-          );
-          console.log("OSRM path decoded, points:", path.value.length);
-        } else {
-          console.error("Invalid OSRM response format:", osrmRoute);
-          throw new Error("Invalid OSRM response");
+          totalOSMDistance += segment.legs[0].distance.value;
+          totalOSMDuration += segment.legs[0].duration.value;
         }
 
-        // Create a smaller, more focused bounding box for A*
-        // This will make the A* algorithm run much faster
-        const padding = 0.005; // About 500 meters of padding
+        // Get A* route
+        const padding = 0.005;
         const smallerBounds = {
-          south: Math.min(startPoint.value.lat, endPoint.value.lat) - padding,
-          north: Math.max(startPoint.value.lat, endPoint.value.lat) + padding,
-          west: Math.min(startPoint.value.lng, endPoint.value.lng) - padding,
-          east: Math.max(startPoint.value.lng, endPoint.value.lng) + padding,
+          south: Math.max(Math.min(from.lat, to.lat) - padding, SEATTLE_BOUNDS.south),
+          north: Math.min(Math.max(from.lat, to.lat) + padding, SEATTLE_BOUNDS.north),
+          west: Math.max(Math.min(from.lng, to.lng) - padding, SEATTLE_BOUNDS.west),
+          east: Math.min(Math.max(from.lng, to.lng) + padding, SEATTLE_BOUNDS.east),
         };
 
-        // Ensure we don't go outside Seattle bounds
-        smallerBounds.south = Math.max(
-          smallerBounds.south,
-          SEATTLE_BOUNDS.south
-        );
-        smallerBounds.north = Math.min(
-          smallerBounds.north,
-          SEATTLE_BOUNDS.north
-        );
-        smallerBounds.west = Math.max(smallerBounds.west, SEATTLE_BOUNDS.west);
-        smallerBounds.east = Math.min(smallerBounds.east, SEATTLE_BOUNDS.east);
+        const aStarSegment = await calculateAStarPath(from, to, smallerBounds);
+        if (aStarSegment?.routes?.[0]) {
+          const segment = aStarSegment.routes[0];
+          const segmentPath = decodePolyline(segment.overview_polyline.points);
+          aStarPath.value.push(...segmentPath);
 
-        console.log("Using smaller bounds for A*:", smallerBounds);
-
-        // Calculate A* route using the smaller bounds
-        console.log("Calculating A* route...");
-        const aStarResult = await calculateAStarPath(
-          startPoint.value,
-          endPoint.value,
-          smallerBounds
-        );
-        console.log("A* result received:", aStarResult);
-
-        if (aStarResult && aStarResult.routes && aStarResult.routes[0]) {
-          aStarPath.value = decodePolyline(
-            aStarResult.routes[0].overview_polyline.points
-          );
-          console.log("A* path decoded, points:", aStarPath.value.length);
+          totalAStarDistance += segment?.legs?.[0]?.distance?.value || 0;
+          totalNodesExplored += segment?.nodesExplored || 0;
         } else {
-          console.error("Invalid A* response format:", aStarResult);
-          // Fall back to OSRM route for A* path if A* fails
-          aStarPath.value = [...path.value];
+          console.warn("A* failed for segment. Falling back to OSRM path segment.");
+          aStarPath.value.push(...path.value);
         }
-
-        // Set up route information panel
-        routeInfo.value = {
-          osmDistance: osrmRoute.routes[0].legs[0].distance.text,
-          osmDuration: osrmRoute.routes[0].legs[0].duration.text,
-          aStarDistance:
-            aStarResult?.routes?.[0]?.legs?.[0]?.distance?.text || "N/A",
-          nodesExplored: aStarResult?.routes?.[0]?.nodesExplored || 0,
-        };
-
-        // Force update of paths
-        await nextTick();
-        updatePaths();
-      } catch (error) {
-        console.error("Error calculating routes:", error);
-        alert("Error calculating routes. Please try again.");
-      } finally {
-        isLoading.value = false;
       }
+
+      routeInfo.value = {
+        osmDistance: (totalOSMDistance / 1000).toFixed(2) + " km",
+        osmDuration: (totalOSMDuration / 60).toFixed(2) + " min",
+        aStarDistance: (totalAStarDistance / 1000).toFixed(2) + " km",
+        nodesExplored: totalNodesExplored,
+      };
+
+      await nextTick();
+      updatePaths();
+    } catch (error) {
+      console.error("Error calculating routes:", error);
+      alert("Error calculating routes. Please try again.");
+    } finally {
+      isLoading.value = false;
+    }
     }
 
     // Function to clear all leaflet markers
@@ -438,8 +410,7 @@ export default {
       mapLoaded,
       mapRef,
       loadingStatus,
-      startPoint,
-      endPoint,
+      points,
       markers,
       path,
       aStarPath,

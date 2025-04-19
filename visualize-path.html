@@ -117,8 +117,10 @@
       ];
 
       // Original start and end points from your test data
-      const startPoint = { lat: 47.608246, lng: -122.332303 }; // Seattle downtown
-      const endPoint = { lat: 47.603501, lng: -122.322514 }; // Space Needle
+      const points = [
+        { lat: 47.608246, lng: -122.332303 }, // Seattle downtown
+        { lat: 47.603501, lng: -122.322514 }, // Space Needle
+      ];
 
       // Draw the A* path
       const pathLine = L.polyline(pathPoints, {
@@ -127,12 +129,14 @@
         opacity: 0.7,
       }).addTo(map);
 
-      // Add markers for start and end points
-      L.marker([startPoint.lat, startPoint.lng])
-        .addTo(map)
-        .bindPopup("Start Point");
-
-      L.marker([endPoint.lat, endPoint.lng]).addTo(map).bindPopup("End Point");
+      map.fitBounds(pathLine.getBounds());
+      
+      // Add markers for points
+      points.forEach((point, index) => {
+        L.marker([point.lat, point.lng])
+          .addTo(map)
+          .bindPopup(`Point ${index + 1}`);
+      });
     </script>
   </body>
 </html>
