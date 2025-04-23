@@ -1,17 +1,20 @@
 <template>
   <div class="bg-white rounded-lg shadow-md p-4 mb-4">
     <h2 class="text-xl font-semibold mb-2">Selected Points</h2>
-    <div v-if="startPoint">
-      <p><strong>Start:</strong> {{ formatCoordinates(startPoint) }}</p>
-    </div>
-    <div v-if="endPoint">
-      <p><strong>End:</strong> {{ formatCoordinates(endPoint) }}</p>
-    </div>
-    <div v-if="!startPoint && !endPoint">
-      <p>No points selected yet. Click on the map to select a start point.</p>
+
+    <div v-if="points.length">
+      <ul class="space-y-1">
+        <li v-for="(point, index) in points" :key="index">
+          <strong>Point {{ index + 1 }}:</strong> {{ formatCoordinates(point) }}
+        </li>
+      </ul>
     </div>
 
-    <div class="mt-4" v-if="startPoint && endPoint">
+    <div v-else>
+      <p>No points selected yet. Click on the map to add points.</p>
+    </div>
+
+    <div class="mt-4" v-if="points.length >= 2">
       <button
         @click="$emit('calculate')"
         class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full"
@@ -19,6 +22,7 @@
       >
         {{ isLoading ? "Calculating..." : "Calculate Route" }}
       </button>
+
       <button
         @click="$emit('reset')"
         class="mt-2 bg-gray-300 text-gray-800 px-4 py-2 rounded hover:bg-gray-400 w-full"
@@ -34,16 +38,18 @@ import { formatCoordinates } from "../services/geoUtils";
 
 export default {
   props: {
-    startPoint: Object,
-    endPoint: Object,
+    points: {
+      type: Array,
+      default: () => [],
+    },
     isLoading: {
       type: Boolean,
       default: false,
     },
   },
+  emits: ["calculate", "reset"],
   methods: {
     formatCoordinates,
   },
-  emits: ["calculate", "reset"],
 };
 </script>
