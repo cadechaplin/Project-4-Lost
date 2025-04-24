@@ -11,17 +11,25 @@ import {
 import { CustomPriorityQueue } from "./common.js";
 import { fallbackGridBasedAStar } from "./gridRouting.js";
 import { calculateHaversineDistance } from "../geoUtils.js";
+import { getElevation } from "../elevationService.js";
 
 // Seattle landmark nodes for the landmark-based heuristic
 const SEATTLE_LANDMARKS = [
-  // Downtown Seattle
+  // Existing landmarks
   { id: "downtown", lat: 47.6062, lng: -122.3321 },
-  // University of Washington
   { id: "uw", lat: 47.6553, lng: -122.3035 },
-  // Space Needle
   { id: "spaceneedle", lat: 47.6205, lng: -122.3493 },
-  // Pike Place Market
   { id: "pikeplace", lat: 47.6097, lng: -122.342 },
+
+  // Add more strategically placed landmarks
+  { id: "capitolhill", lat: 47.6231, lng: -122.3145 },
+  { id: "greenlake", lat: 47.6803, lng: -122.3283 },
+  { id: "ballard", lat: 47.6668, lng: -122.3843 },
+  { id: "rainier", lat: 47.5661, lng: -122.2936 },
+  { id: "westseattle", lat: 47.5667, lng: -122.386 },
+  { id: "northgate", lat: 47.7065, lng: -122.3273 },
+  { id: "magnolia", lat: 47.6502, lng: -122.3999 },
+  { id: "sewardpark", lat: 47.5492, lng: -122.2649 },
 ];
 
 // Cache for landmark distances
@@ -167,7 +175,7 @@ export const heuristics = {
   },
 
   // Elevation-aware heuristic - adds penalties for climbing
-  elevation: function (nodeA, nodeB, elevationData) {
+  elevation: async function (nodeA, nodeB) {
     if (!nodeA || !nodeB) {
       console.error("Invalid nodes in elevation heuristic:", { nodeA, nodeB });
       return Infinity;
@@ -178,22 +186,35 @@ export const heuristics = {
       { lat: nodeB.lat, lng: nodeB.lng }
     );
 
-    // If we have elevation data, use it (for demonstration, we simulate with lat)
-    // In a real implementation, you would use actual elevation data from an API
-    const simulatedElevationA = nodeA.lat * 100;
-    const simulatedElevationB = nodeB.lat * 100;
+    try {
+      // Get real elevation data
+      const elevationA = await getElevation({ lat: nodeA.lat, lng: nodeA.lng });
+      const elevationB = await getElevation({ lat: nodeB.lat, lng: nodeB.lng });
 
-    // Use latitude as a simple proxy for elevation (just for demonstration)
-    // In real implementation, we would use actual elevation data
-    const elevationDiff = (nodeB.lat - nodeA.lat) * 1000; // Rough approximation
+      // Calculate elevation difference
+      const elevationDiff = elevationB - elevationA;
 
-    // Penalize uphill movement (positive elevation change)
-    if (elevationDiff > 0) {
-      // Add 10% penalty per 100m of elevation gain
-      return baseDistance * (1 + elevationDiff / 1000);
+      // Penalize uphill movement (positive elevation change)
+      if (elevationDiff > 0) {
+        // Add 10% penalty per 100m of elevation gain
+        return baseDistance * (1 + elevationDiff / 1000);
+      }
+
+      return baseDistance;
+    } catch (error) {
+      console.error("Error in elevation heuristic:", error);
+
+      // Fall back to the simulated elevation logic
+      const simulatedElevationA = nodeA.lat * 100;
+      const simulatedElevationB = nodeB.lat * 100;
+      const elevationDiff = (nodeB.lat - nodeA.lat) * 1000; // Rough approximation
+
+      if (elevationDiff > 0) {
+        return baseDistance * (1 + elevationDiff / 1000);
+      }
+
+      return baseDistance;
     }
-
-    return baseDistance;
   },
 };
 
@@ -210,7 +231,7 @@ export async function calculateAStarPath(
   start,
   end,
   bounds,
-  options = { gridSize: 100, heuristic: "haversine" }
+  options = { gridSize: 100, heuristic: "haversine", minPathLength: 3 }
 ) {
   console.log("A* calculation starting with:", {
     start,
@@ -268,7 +289,11 @@ export async function calculateAStarPath(
     );
 
     // Check if we got a valid result
-    if (result && result.path && result.path.length >= 3) {
+    if (
+      result &&
+      result.path &&
+      result.path.length >= (options.minPathLength || 3)
+    ) {
       console.log(`Using A* result with ${heuristicName} heuristic`);
       const formattedResult = convertAStarToOSRMFormat(result);
       formattedResult.routes[0].heuristic = heuristicName; // Add heuristic info
@@ -330,7 +355,7 @@ export function runAStarOnStreetGraph(
 
   // Track statistics
   let nodesExplored = 0;
-  let maxIterations = 10000000; // Prevent infinite loops
+  let maxIterations = 50000000; // Prevent infinite loops
   let iterations = 0;
 
   // Track all explored nodes for visualization
