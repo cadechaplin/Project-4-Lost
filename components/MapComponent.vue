@@ -95,6 +95,7 @@ import waterBodies from "../data/waterBodies.json";
 // Import child components
 import PointSelector from "./PointSelector.vue";
 import RouteInfo from "./RouteInfo.vue";
+import { getSeattleGraph } from "../services/graphCache.js";
 
 function addWaterLayer(map, L) {
   L.geoJSON(waterBodies, {
@@ -228,6 +229,12 @@ export default {
 
         loadingStatus.value = "Initializing map...";
         await initMap();
+
+        // Pre-load the Seattle graph in the background
+        getSeattleGraph(SEATTLE_BOUNDS).catch((error) => {
+          console.warn("Background graph loading failed:", error);
+          // Non-critical error, app will retry when needed
+        });
       } catch (error) {
         console.error("Error during map initialization:", error);
         loadingStatus.value = `Error: ${

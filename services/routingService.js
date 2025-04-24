@@ -9,6 +9,7 @@ import {
   decodePolyline,
 } from "./geoUtils.js";
 import waterBodies from "../data/waterBodies.json";
+import { getSeattleGraph } from "./graphCache.js";
 
 /**
  * Get directions from OpenStreetMap's OSRM API
@@ -154,52 +155,13 @@ export async function calculateAStarPath(
   bounds,
   options = { gridSize: 100 }
 ) {
-  // Always use the entire Seattle bounds, not just around the points
-  const fullAreaStart = { lat: bounds.south, lng: bounds.west };
-  const fullAreaEnd = { lat: bounds.north, lng: bounds.east };
-
-  // Use full Seattle bounds instead of the smaller area
-  const expandedBounds = {
-    south: bounds.south - 0.2,
-    north: bounds.north + 0.2,
-    west: bounds.west - 0.2,
-    east: bounds.east + 0.2,
-  };
-  console.log("A* STARTING with:", { start, end, expandedBounds, options });
+  console.log("A* calculation starting with:", { start, end, options });
 
   try {
-    // Step 1: Fetch street data from OpenStreetMap for the area
-    const streetData = await fetchStreetData(start, end, expandedBounds);
+    // Step 1: Get the cached Seattle graph
+    const graph = await getSeattleGraph(bounds);
 
-    console.log(
-      `Fetched street data: ${streetData?.elements?.length || 0} elements`
-    );
-
-    // Check if we got enough data to build a meaningful graph
-    if (
-      !streetData ||
-      !streetData.elements ||
-      streetData.elements.length < 20
-    ) {
-      console.warn(
-        "Not enough street data elements, falling back to grid-based approach"
-      );
-      throw new Error("Insufficient street data");
-    }
-
-    // Step 2: Build the graph from street data
-    const graph = buildStreetGraph(streetData);
-    console.log(`Built graph with ${graph?.length || 0} nodes`);
-
-    // Ensure we have a minimally connected graph
-    if (!graph || graph.length < 10) {
-      console.warn(
-        `Graph too small (${graph?.length || 0} nodes), likely disconnected`
-      );
-      throw new Error("Graph too small, likely disconnected");
-    }
-
-    // Step 3: Find closest nodes to start and end points
+    // Step 2: Find closest nodes to start and end points
     const startNode = findClosestNode(graph, start);
     const endNode = findClosestNode(graph, end);
 
@@ -221,7 +183,7 @@ export async function calculateAStarPath(
       );
     }
 
-    // Step 4: Run A* algorithm on the street graph
+    // Step 3: Run A* algorithm on the street graph
     const result = runAStarOnStreetGraph(graph, startNode, endNode);
     console.log(
       `A* result: ${result.path.length} points, ${result.nodesExplored} nodes explored`
@@ -241,13 +203,9 @@ export async function calculateAStarPath(
     console.error("Error in A* with street data:", error);
     console.log("Falling back to grid-based A*");
 
-    // Increase grid size significantly for better resolution if street data fails
-    const gridResult = await fallbackGridBasedAStar(
-      start,
-      end,
-      bounds,
-      { gridSize: Math.max(options.gridSize, 500) } // Use at least 500x500 grid
-    );
+    const gridResult = await fallbackGridBasedAStar(start, end, bounds, {
+      gridSize: Math.max(options.gridSize, 500),
+    });
 
     return convertAStarToOSRMFormat(gridResult);
   }
@@ -271,59 +229,14 @@ export async function calculateThirdRoute(
   console.log("Third route calculation starting with:", {
     start,
     end,
-    bounds,
     options,
   });
 
   try {
-    // Always use the entire Seattle bounds, not just around the points
-    const fullAreaStart = { lat: bounds.south, lng: bounds.west };
-    const fullAreaEnd = { lat: bounds.north, lng: bounds.east };
+    // Step 1: Get the cached Seattle graph
+    const graph = await getSeattleGraph(bounds);
 
-    // Use full Seattle bounds instead of the smaller area
-    const expandedBounds = {
-      south: bounds.south - 0.2,
-      north: bounds.north + 0.2,
-      west: bounds.west - 0.2,
-      east: bounds.east + 0.2,
-    };
-
-    // Fetch street data for the entire area
-    const streetData = await fetchStreetData(
-      fullAreaStart,
-      fullAreaEnd,
-      expandedBounds // Use expanded bounds
-    );
-
-    console.log(
-      `Fetched street data: ${streetData?.elements?.length || 0} elements`
-    );
-
-    // Check if we got enough data to build a meaningful graph
-    if (
-      !streetData ||
-      !streetData.elements ||
-      streetData.elements.length < 20
-    ) {
-      console.warn(
-        "Not enough street data elements, falling back to grid-based approach"
-      );
-      throw new Error("Insufficient street data");
-    }
-
-    // Step 2: Build the graph from street data
-    const graph = buildStreetGraph(streetData);
-    console.log(`Built graph with ${graph?.length || 0} nodes`);
-
-    // Ensure we have a minimally connected graph
-    if (!graph || graph.length < 10) {
-      console.warn(
-        `Graph too small (${graph?.length || 0} nodes), likely disconnected`
-      );
-      throw new Error("Graph too small, likely disconnected");
-    }
-
-    // Step 3: Find closest nodes to start and end points
+    // Step 2: Find closest nodes to start and end points
     const startNode = findClosestNode(graph, start);
     const endNode = findClosestNode(graph, end);
 
@@ -336,7 +249,7 @@ export async function calculateThirdRoute(
       throw new Error("Could not find suitable road nodes");
     }
 
-    // Step 4: Run A* algorithm on the street graph
+    // Step 3: Run A* algorithm on the street graph
     try {
       const result = runAStarOnStreetGraph3(graph, startNode, endNode);
       console.log(
@@ -361,7 +274,7 @@ export async function calculateThirdRoute(
       }
     } catch (error) {
       console.error("Error in runAStarOnStreetGraph3:", error);
-      throw error; // Re-throw the error to trigger fallback
+      throw error;
     }
   } catch (error) {
     console.error("Error in third route calculation:", error);
@@ -1261,3 +1174,5 @@ function isPointInPolygon(point, polygon) {
   }
   return inside;
 }
+
+export { fetchStreetData, buildStreetGraph };
