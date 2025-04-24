@@ -1,37 +1,62 @@
 <template>
-  <!-- Route information panel with distinctive styling to highlight results -->
-  <div
-    class="bg-red-200 border-4 border-red-600 rounded-lg shadow-md p-4"
-    v-if="routeInfo"
-  >
-    <h2 class="text-xl font-semibold mb-2 text-red-800">
-      !!! ROUTE INFORMATION !!!
-    </h2>
-    <!-- OSRM route statistics section -->
-    <div class="mb-2">
-      <h3 class="font-medium">OSRM Route:</h3>
-      <p>Distance: {{ routeInfo.osmDistance }}</p>
-      <p>Duration: {{ routeInfo.osmDuration }}</p>
+  <div class="bg-white rounded-lg shadow-md p-4 mb-4 mt-4">
+    <h2 class="text-xl font-semibold mb-2">Route Information</h2>
+
+    <!-- No route info message -->
+    <div v-if="!routeInfo" class="text-gray-500">
+      No route calculated yet. Select points and click "Calculate Route".
     </div>
-    <!-- A* algorithm route statistics section -->
-    <div>
-      <h3 class="font-medium">A* Route:</h3>
-      <p>Distance: {{ routeInfo.aStarDistance }}</p>
-      <p>Nodes Explored: {{ routeInfo.nodesExplored }}</p>
-      <p class="font-bold text-red-600">THIS IS THE UPDATED VERSION!</p>
+
+    <!-- Route info content -->
+    <div v-else>
+      <div class="mb-4">
+        <h3 class="font-semibold text-blue-600">OSRM Route</h3>
+        <div class="grid grid-cols-2 gap-2">
+          <div>Distance:</div>
+          <div>{{ routeInfo.osmDistance }}</div>
+          <div>Duration:</div>
+          <div>{{ routeInfo.osmDuration }}</div>
+        </div>
+      </div>
+
+      <!-- A* Heuristic Results -->
+      <div class="mb-4">
+        <h3 class="font-semibold text-red-600">A* Algorithm Heuristics</h3>
+
+        <div
+          v-for="result in heuristicResults"
+          :key="result.heuristic"
+          class="mt-3 pb-2 border-b border-gray-200"
+        >
+          <div class="flex items-center mb-1">
+            <div
+              class="w-3 h-3 mr-2"
+              :style="{ backgroundColor: result.color }"
+            ></div>
+            <strong>{{ result.label }}</strong>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>Distance:</div>
+            <div>{{ result.distance }}</div>
+            <div>Nodes Explored:</div>
+            <div>{{ result.nodesExplored.toLocaleString() }}</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script>
 export default {
-  // Component props definition
   props: {
-    // Route information object containing comparison data between OSRM and A* algorithms
-    // Format: { osmDistance, osmDuration, aStarDistance, nodesExplored }
     routeInfo: {
       type: Object,
-      default: null, // Will not display if null (no route calculated yet)
+      default: null,
+    },
+    heuristicResults: {
+      type: Array,
+      default: () => [],
     },
   },
 };

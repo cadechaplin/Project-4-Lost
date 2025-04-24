@@ -11,8 +11,8 @@
         <h2 class="text-xl font-semibold mb-2">Instructions</h2>
         <p>
           Click on the map to select start and end points. The app will
-          calculate the route using both OpenStreetMap's OSRM routing and the A*
-          algorithm.
+          calculate the route using OpenStreetMap's OSRM routing and multiple A*
+          heuristics for comparison.
         </p>
       </div>
 
@@ -40,18 +40,27 @@
 
               <!-- Map legend overlay showing route colors -->
               <div
-                class="absolute bottom-4 left-0 right-0 z-10 flex items-center justify-center space-x-4 bg-white bg-opacity-75 py-2"
+                class="absolute bottom-4 left-0 right-0 z-10 flex flex-wrap items-center justify-center space-x-4 bg-white bg-opacity-75 py-2 px-2"
               >
                 <div class="flex items-center">
                   <div class="w-4 h-4 bg-blue-500 mr-2"></div>
                   <span>OSRM Route</span>
                 </div>
-                <div class="flex items-center">
-                  <div
-                    class="w-4 h-4 bg-red-500 mr-2"
-                    style="border-top: 2px dashed"
-                  ></div>
-                  <span>A* Route</span>
+                <div
+                  v-for="(route, index) in heuristicRoutes"
+                  :key="route.heuristic"
+                >
+                  <div class="flex items-center">
+                    <div
+                      class="w-4 h-4 mr-2"
+                      :style="{
+                        backgroundColor: route.color,
+                        borderTop:
+                          route.style === 'dashed' ? '2px dashed' : 'none',
+                      }"
+                    ></div>
+                    <span>{{ route.label }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -69,7 +78,10 @@
           />
 
           <!-- Route information display component -->
-          <RouteInfo :routeInfo="routeInfo" />
+          <RouteInfo
+            :routeInfo="routeInfo"
+            :heuristicResults="heuristicResults"
+          />
         </div>
       </div>
     </main>
@@ -88,11 +100,13 @@ import {
 import {
   getOpenStreetMapDirections,
   calculateAStarPath,
-} from "../services/routingService";
+  calculateThirdRoute,
+} from "../services/routing/index.js";
 import { decodePolyline } from "../services/geoUtils";
 // Import child components
 import PointSelector from "./PointSelector.vue";
 import RouteInfo from "./RouteInfo.vue";
+import { getSeattleGraph } from "../services/graphCache.js";
 
 export default {
   // Register child components
@@ -103,20 +117,68 @@ export default {
   setup() {
     // Map initialization and state refs
     const mapLoaded = ref(false);
-    const mapRef = ref(null);         // DOM reference to map container
-    const map = ref(null);            // Leaflet map instance
-    const leafletMarkers = ref([]);   // Markers added to the map
+    const mapRef = ref(null); // DOM reference to map container
+    const map = ref(null); // Leaflet map instance
+    const leafletMarkers = ref([]); // Markers added to the map
     const leafletPolylines = ref([]); // Route polylines added to the map
     const loadingStatus = ref("Initializing..."); // Map loading status message
-    const L = ref(null);              // Leaflet library reference
+    const L = ref(null); // Leaflet library reference
 
     // Route planning state refs
-    const points = ref([]);           // User-selected geographic points
-    const markers = ref([]);          // Marker data for rendering
-    const path = ref([]);             // OSRM route path points
-    const aStarPath = ref([]);        // A* algorithm route path points
-    const isLoading = ref(false);     // Loading state for route calculation
-    const routeInfo = ref(null);      // Route comparison information
+    const points = ref([]); // User-selected geographic points
+    const markers = ref([]); // Marker data for rendering
+    const path = ref([]); // OSRM route path points
+    const aStarPathsMap = ref({}); // Map of heuristic name to path points
+    const thirdRoutePath = ref([]); // Third route path points
+    const isLoading = ref(false); // Loading state for route calculation
+    const routeInfo = ref(null); // Route comparison information
+    const heuristicResults = ref([]); // Results for each heuristic
+
+    // Define available heuristics and their display properties
+    const heuristicRoutes = [
+      {
+        heuristic: "haversine",
+        label: "A* Haversine",
+        color: "#EA4335",
+        style: "solid",
+      },
+      {
+        heuristic: "manhattan",
+        label: "A* Manhattan",
+        color: "#FBBC05",
+        style: "dashed",
+      },
+      {
+        heuristic: "dijkstra",
+        label: "A* Dijkstra",
+        color: "#34A853",
+        style: "solid",
+      },
+      {
+        heuristic: "weighted",
+        label: "A* Weighted",
+        color: "#9c27b0",
+        style: "dashed",
+      },
+      {
+        heuristic: "timeBased",
+        label: "A* Time Based",
+        color: "#ff5722",
+        style: "solid",
+      },
+      {
+        heuristic: "landmark",
+        label: "A* Landmark",
+        color: "#607d8b",
+        style: "dashed",
+      },
+      {
+        heuristic: "elevation",
+        label: "A* Elevation",
+        color: "#00bcd4",
+        style: "solid",
+      },
+    ];
 
     // Seattle geographic boundaries (used to constrain point selection)
     const SEATTLE_BOUNDS = {
@@ -212,6 +274,12 @@ export default {
 
         loadingStatus.value = "Initializing map...";
         await initMap();
+
+        // Pre-load the Seattle graph in the background
+        getSeattleGraph(SEATTLE_BOUNDS).catch((error) => {
+          console.warn("Background graph loading failed:", error);
+          // Non-critical error, app will retry when needed
+        });
       } catch (error) {
         console.error("Error during map initialization:", error);
         loadingStatus.value = `Error: ${
@@ -262,7 +330,10 @@ export default {
 
       console.log("Updating paths:", {
         osmPath: path.value.length,
-        aStarPath: aStarPath.value.length,
+        aStarPaths: Object.keys(aStarPathsMap.value).map(
+          (k) => `${k}: ${aStarPathsMap.value[k].length}`
+        ),
+        thirdRoutePath: thirdRoutePath.value.length,
       });
 
       // Clear existing polylines
@@ -293,24 +364,65 @@ export default {
         console.warn("No OSRM path points to display");
       }
 
-      // Add A* route polyline (red dashed line)
-      if (aStarPath.value.length > 0) {
-        console.log("Drawing A* path with", aStarPath.value.length, "points");
-        const aStarPolyline = addPolylineToMap(map.value, aStarPath.value, {
-          color: "#EA4335", // Google red
-          weight: 5,
-          opacity: 0.8,
-          dashArray: "10, 10", // Creates a dashed line pattern
-        });
+      // Add polylines for each A* heuristic
+      for (const route of heuristicRoutes) {
+        const heuristicPath = aStarPathsMap.value[route.heuristic] || [];
 
-        if (aStarPolyline) {
-          console.log("A* polyline added to map");
-          leafletPolylines.value.push(aStarPolyline);
+        if (heuristicPath.length > 0) {
+          console.log(
+            `Drawing ${route.heuristic} path with ${heuristicPath.length} points`
+          );
+
+          const pathStyle = {
+            color: route.color,
+            weight: 5,
+            opacity: 0.8,
+          };
+
+          if (route.style === "dashed") {
+            pathStyle.dashArray = "10, 10";
+          }
+
+          const polyline = addPolylineToMap(
+            map.value,
+            heuristicPath,
+            pathStyle
+          );
+
+          if (polyline) {
+            console.log(`${route.heuristic} polyline added to map`);
+            leafletPolylines.value.push(polyline);
+          } else {
+            console.error(`Failed to add ${route.heuristic} polyline to map`);
+          }
         } else {
-          console.error("Failed to add A* polyline to map");
+          console.warn(`No ${route.heuristic} path points to display`);
         }
-      } else {
-        console.warn("No A* path points to display");
+      }
+
+      // Add third route polyline
+      if (thirdRoutePath.value.length > 0) {
+        console.log(
+          "Drawing third route path with",
+          thirdRoutePath.value.length,
+          "points"
+        );
+        const thirdRoutePolyline = addPolylineToMap(
+          map.value,
+          thirdRoutePath.value,
+          {
+            color: "#673AB7", // Purple
+            weight: 5,
+            opacity: 0.8,
+          }
+        );
+
+        if (thirdRoutePolyline) {
+          console.log("Third route polyline added to map");
+          leafletPolylines.value.push(thirdRoutePolyline);
+        } else {
+          console.error("Failed to add third route polyline to map");
+        }
       }
 
       // Ensure the map redraws correctly
@@ -322,7 +434,8 @@ export default {
     // Set up watchers to update UI when state changes
     watch(() => markers.value, updateMarkers, { deep: true });
     watch(() => path.value, updatePaths, { deep: true });
-    watch(() => aStarPath.value, updatePaths, { deep: true });
+    watch(() => aStarPathsMap.value, updatePaths, { deep: true });
+    watch(() => thirdRoutePath.value, updatePaths, { deep: true });
 
     /**
      * Handle user clicking on the map to select a point
@@ -357,8 +470,10 @@ export default {
       points.value = [];
       markers.value = [];
       path.value = [];
-      aStarPath.value = [];
+      aStarPathsMap.value = {};
+      thirdRoutePath.value = [];
       routeInfo.value = null;
+      heuristicResults.value = [];
     }
 
     /**
@@ -373,78 +488,154 @@ export default {
       // Set loading state and clear previous data
       isLoading.value = true;
       path.value = [];
-      aStarPath.value = [];
+      aStarPathsMap.value = {};
+      thirdRoutePath.value = [];
       routeInfo.value = null;
+      heuristicResults.value = [];
       clearLeafletMarkers(); // Clear previous markers
 
       try {
         // Initialize counters for total metrics
         let totalOSMDistance = 0;
         let totalOSMDuration = 0;
-        let totalAStarDistance = 0;
-        let totalNodesExplored = 0;
+
+        // Initialize heuristic results
+        const heuristicData = {};
+        for (const route of heuristicRoutes) {
+          heuristicData[route.heuristic] = {
+            distance: 0,
+            nodesExplored: 0,
+            path: [],
+          };
+        }
 
         // Calculate route for each segment between consecutive points
         for (let i = 0; i < points.value.length - 1; i++) {
           const from = points.value[i];
           const to = points.value[i + 1];
 
-          console.log(`Calculating route from point ${i + 1} to point ${i + 2}`);
+          console.log(
+            `Calculating route from point ${i + 1} to point ${i + 2}`
+          );
 
-        // Get OSRM route for the blue line
-        const osrmSegment = await getOpenStreetMapDirections(from, to);
-        if (osrmSegment?.routes?.[0]) {
-          const segment = osrmSegment.routes[0];
-          const segmentPath = decodePolyline(segment.overview_polyline.points);
-          path.value.push(...segmentPath);
+          // Get OSRM route for the blue line
+          const osrmSegment = await getOpenStreetMapDirections(from, to);
+          if (osrmSegment?.routes?.[0]) {
+            const segment = osrmSegment.routes[0];
+            const segmentPath = decodePolyline(
+              segment.overview_polyline.points
+            );
+            path.value.push(...segmentPath);
 
-          // Add segment metrics to totals
-          totalOSMDistance += segment.legs[0].distance.value;
-          totalOSMDuration += segment.legs[0].duration.value;
+            // Add segment metrics to totals
+            totalOSMDistance += segment.legs[0].distance.value;
+            totalOSMDuration += segment.legs[0].duration.value;
+          }
+
+          // Calculate paths for each A* heuristic
+          for (const route of heuristicRoutes) {
+            console.log(
+              `Calculating A* path with ${route.heuristic} heuristic`
+            );
+
+            try {
+              // Use full Seattle bounds for all heuristics
+              const aStarSegment = await calculateAStarPath(
+                from,
+                to,
+                SEATTLE_BOUNDS, // Use the full Seattle bounds instead of route-specific bounds
+                {
+                  gridSize: 150, // Increase grid size
+                  heuristic: route.heuristic,
+                  minPathLength: 2, // Accept shorter paths
+                }
+              );
+
+              if (aStarSegment?.routes?.[0]) {
+                const segment = aStarSegment.routes[0];
+                const segmentPath = decodePolyline(
+                  segment.overview_polyline.points
+                );
+
+                // Initialize the array if it doesn't exist
+                if (!aStarPathsMap.value[route.heuristic]) {
+                  aStarPathsMap.value[route.heuristic] = [];
+                }
+
+                // Add segment to the full path
+                aStarPathsMap.value[route.heuristic].push(...segmentPath);
+
+                // Add metrics to totals
+                heuristicData[route.heuristic].distance +=
+                  segment?.legs?.[0]?.distance?.value || 0;
+                heuristicData[route.heuristic].nodesExplored +=
+                  segment?.nodesExplored || 0;
+              } else {
+                console.warn(
+                  `A* with ${route.heuristic} failed for segment. Falling back to OSRM.`
+                );
+
+                // Initialize with empty array if needed
+                if (!aStarPathsMap.value[route.heuristic]) {
+                  aStarPathsMap.value[route.heuristic] = [];
+                }
+
+                // Use OSRM path as fallback
+                aStarPathsMap.value[route.heuristic].push(...path.value);
+              }
+            } catch (error) {
+              console.error(
+                `Error calculating ${route.heuristic} route:`,
+                error
+              );
+            }
+          }
+
+          // Calculate third route for this segment
+          const thirdRouteSegment = await calculateThirdRoute(
+            from,
+            to,
+            SEATTLE_BOUNDS, // Use full Seattle bounds here too
+            { gridSize: 150 }
+          );
+          if (thirdRouteSegment?.routes?.[0]) {
+            const segment = thirdRouteSegment.routes[0];
+            const segmentPath = decodePolyline(
+              segment.overview_polyline.points
+            );
+            thirdRoutePath.value.push(...segmentPath);
+          } else {
+            console.warn("Third route failed for segment.");
+          }
         }
 
-        // Get A* route with optimized boundaries around the segment
-        const padding = 0.005; // ~500m padding
-        const smallerBounds = {
-          south: Math.max(Math.min(from.lat, to.lat) - padding, SEATTLE_BOUNDS.south),
-          north: Math.min(Math.max(from.lat, to.lat) + padding, SEATTLE_BOUNDS.north),
-          west: Math.max(Math.min(from.lng, to.lng) - padding, SEATTLE_BOUNDS.west),
-          east: Math.min(Math.max(from.lng, to.lng) + padding, SEATTLE_BOUNDS.east),
+        // Create the main route info object for display
+        routeInfo.value = {
+          osmDistance: (totalOSMDistance / 1000).toFixed(2) + " km",
+          osmDuration: (totalOSMDuration / 60).toFixed(2) + " min",
         };
 
-        // Calculate A* path for this segment
-        const aStarSegment = await calculateAStarPath(from, to, smallerBounds);
-        if (aStarSegment?.routes?.[0]) {
-          const segment = aStarSegment.routes[0];
-          const segmentPath = decodePolyline(segment.overview_polyline.points);
-          aStarPath.value.push(...segmentPath);
+        // Create comparison results for each heuristic
+        heuristicResults.value = heuristicRoutes.map((route) => {
+          const data = heuristicData[route.heuristic];
+          return {
+            heuristic: route.heuristic,
+            label: route.label,
+            color: route.color,
+            distance: (data.distance / 1000).toFixed(2) + " km",
+            nodesExplored: data.nodesExplored,
+          };
+        });
 
-          // Add A* metrics to totals
-          totalAStarDistance += segment?.legs?.[0]?.distance?.value || 0;
-          totalNodesExplored += segment?.nodesExplored || 0;
-        } else {
-          console.warn("A* failed for segment. Falling back to OSRM path segment.");
-          aStarPath.value.push(...path.value);
-        }
+        // Wait for Vue to update before redrawing paths
+        await nextTick();
+        updatePaths();
+      } catch (error) {
+        console.error("Error calculating routes:", error);
+        alert("Error calculating routes. Please try again.");
+      } finally {
+        isLoading.value = false;
       }
-
-      // Create the route info object for display
-      routeInfo.value = {
-        osmDistance: (totalOSMDistance / 1000).toFixed(2) + " km",
-        osmDuration: (totalOSMDuration / 60).toFixed(2) + " min",
-        aStarDistance: (totalAStarDistance / 1000).toFixed(2) + " km",
-        nodesExplored: totalNodesExplored,
-      };
-
-      // Wait for Vue to update before redrawing paths
-      await nextTick();
-      updatePaths();
-    } catch (error) {
-      console.error("Error calculating routes:", error);
-      alert("Error calculating routes. Please try again.");
-    } finally {
-      isLoading.value = false;
-    }
     }
 
     /**
@@ -468,9 +659,12 @@ export default {
       points,
       markers,
       path,
-      aStarPath,
+      aStarPathsMap,
+      thirdRoutePath,
       isLoading,
       routeInfo,
+      heuristicResults,
+      heuristicRoutes,
       handlePointSelection,
       resetPoints,
       calculateRoute,
