@@ -12,22 +12,223 @@ import { CustomPriorityQueue } from "./common.js";
 import { fallbackGridBasedAStar } from "./gridRouting.js";
 import { calculateHaversineDistance } from "../geoUtils.js";
 
+// Seattle landmark nodes for the landmark-based heuristic
+const SEATTLE_LANDMARKS = [
+  // Downtown Seattle
+  { id: "downtown", lat: 47.6062, lng: -122.3321 },
+  // University of Washington
+  { id: "uw", lat: 47.6553, lng: -122.3035 },
+  // Space Needle
+  { id: "spaceneedle", lat: 47.6205, lng: -122.3493 },
+  // Pike Place Market
+  { id: "pikeplace", lat: 47.6097, lng: -122.342 },
+];
+
+// Cache for landmark distances
+let landmarkDistances = {};
+
+// Available heuristic functions
+export const heuristics = {
+  // Standard Haversine distance - direct "as the crow flies" distance
+  haversine: function (nodeA, nodeB) {
+    if (!nodeA || !nodeB) {
+      console.error("Invalid nodes in haversine heuristic:", { nodeA, nodeB });
+      return Infinity;
+    }
+    return calculateHaversineDistance(
+      { lat: nodeA.lat, lng: nodeA.lng },
+      { lat: nodeB.lat, lng: nodeB.lng }
+    );
+  },
+
+  // Manhattan-style distance approximation (grid-based)
+  manhattan: function (nodeA, nodeB) {
+    if (!nodeA || !nodeB) {
+      console.error("Invalid nodes in manhattan heuristic:", { nodeA, nodeB });
+      return Infinity;
+    }
+    // Convert to approximate grid coordinates
+    const latDiff = Math.abs(nodeA.lat - nodeB.lat) * 111000; // ~111km per degree latitude
+    const lngDiff =
+      Math.abs(nodeA.lng - nodeB.lng) *
+      111000 *
+      Math.cos(((nodeA.lat + nodeB.lat) * Math.PI) / 360); // Account for longitude scale
+
+    return latDiff + lngDiff;
+  },
+
+  // Dijkstra's algorithm (no heuristic)
+  dijkstra: function () {
+    return 0; // Always return 0, making A* behave like Dijkstra's algorithm
+  },
+
+  // Weighted Haversine - penalizes certain paths
+  weighted: function (nodeA, nodeB) {
+    if (!nodeA || !nodeB) {
+      console.error("Invalid nodes in weighted heuristic:", { nodeA, nodeB });
+      return Infinity;
+    }
+
+    const distance = calculateHaversineDistance(
+      { lat: nodeA.lat, lng: nodeA.lng },
+      { lat: nodeB.lat, lng: nodeB.lng }
+    );
+
+    // Example weight: penalize east-west movement more than north-south
+    const latDiff = Math.abs(nodeA.lat - nodeB.lat);
+    const lngDiff = Math.abs(nodeA.lng - nodeB.lng);
+
+    if (lngDiff > latDiff * 2) {
+      // More east-west movement, apply penalty
+      return distance * 1.2;
+    }
+
+    return distance;
+  },
+
+  // Time-based heuristic - estimates travel time instead of distance
+  timeBased: function (nodeA, nodeB) {
+    if (!nodeA || !nodeB) {
+      console.error("Invalid nodes in timeBased heuristic:", { nodeA, nodeB });
+      return Infinity;
+    }
+
+    const distance = calculateHaversineDistance(
+      { lat: nodeA.lat, lng: nodeA.lng },
+      { lat: nodeB.lat, lng: nodeB.lng }
+    );
+
+    // Assume average travel speed of 30 km/h in city
+    const avgSpeedMps = (30 * 1000) / 3600; // 8.33 meters per second
+
+    // Adjust time estimate based on node properties if available
+    if (nodeA.tags) {
+      // Different speeds for different road types
+      if (nodeA.tags.highway === "motorway" || nodeA.tags.highway === "trunk") {
+        return distance / ((60 * 1000) / 3600); // 60 km/h for highways
+      } else if (
+        nodeA.tags.highway === "residential" ||
+        nodeA.tags.highway === "living_street"
+      ) {
+        return distance / ((20 * 1000) / 3600); // 20 km/h for residential roads
+      }
+    }
+
+    return distance / avgSpeedMps; // Return time in seconds
+  },
+
+  // Landmark-based heuristic - uses pre-selected landmarks for better distance estimates
+  landmark: function (nodeA, nodeB) {
+    if (!nodeA || !nodeB) {
+      console.error("Invalid nodes in landmark heuristic:", { nodeA, nodeB });
+      return Infinity;
+    }
+
+    // Ensure landmark distances to target are initialized
+    if (Object.keys(landmarkDistances).length === 0) {
+      // Initialize landmark distances to the target node
+      for (const landmark of SEATTLE_LANDMARKS) {
+        landmarkDistances[landmark.id] = calculateHaversineDistance(
+          { lat: landmark.lat, lng: landmark.lng },
+          { lat: nodeB.lat, lng: nodeB.lng }
+        );
+      }
+      console.log("Initialized landmark distances to target");
+    }
+
+    // Standard direct distance as baseline
+    const directDistance = calculateHaversineDistance(
+      { lat: nodeA.lat, lng: nodeA.lng },
+      { lat: nodeB.lat, lng: nodeB.lng }
+    );
+
+    // Use triangle inequality to improve the estimate
+    let maxEstimate = directDistance;
+
+    for (const landmark of SEATTLE_LANDMARKS) {
+      // Distance from current node to landmark
+      const distToLandmark = calculateHaversineDistance(
+        { lat: nodeA.lat, lng: nodeA.lng },
+        { lat: landmark.lat, lng: landmark.lng }
+      );
+
+      // Use triangle inequality: |d(A,T) - d(L,T)| <= d(A,L)
+      // So d(A,T) >= |d(L,T) - d(A,L)|
+      const estimate = Math.abs(
+        landmarkDistances[landmark.id] - distToLandmark
+      );
+
+      if (estimate > maxEstimate) {
+        maxEstimate = estimate;
+      }
+    }
+
+    return maxEstimate;
+  },
+
+  // Elevation-aware heuristic - adds penalties for climbing
+  elevation: function (nodeA, nodeB, elevationData) {
+    if (!nodeA || !nodeB) {
+      console.error("Invalid nodes in elevation heuristic:", { nodeA, nodeB });
+      return Infinity;
+    }
+
+    const baseDistance = calculateHaversineDistance(
+      { lat: nodeA.lat, lng: nodeA.lng },
+      { lat: nodeB.lat, lng: nodeB.lng }
+    );
+
+    // If we have elevation data, use it (for demonstration, we simulate with lat)
+    // In a real implementation, you would use actual elevation data from an API
+    const simulatedElevationA = nodeA.lat * 100;
+    const simulatedElevationB = nodeB.lat * 100;
+
+    // Use latitude as a simple proxy for elevation (just for demonstration)
+    // In real implementation, we would use actual elevation data
+    const elevationDiff = (nodeB.lat - nodeA.lat) * 1000; // Rough approximation
+
+    // Penalize uphill movement (positive elevation change)
+    if (elevationDiff > 0) {
+      // Add 10% penalty per 100m of elevation gain
+      return baseDistance * (1 + elevationDiff / 1000);
+    }
+
+    return baseDistance;
+  },
+};
+
 /**
  * Calculate a path between two points using the A* algorithm with real street data
  *
  * @param {Object} start - Starting point {lat, lng}
  * @param {Object} end - Ending point {lat, lng}
  * @param {Object} bounds - Geographic bounds to constrain the search area
- * @param {Object} options - Optional parameters
+ * @param {Object} options - Optional parameters including heuristic method
  * @returns {Object} A* route data in standardized format
  */
 export async function calculateAStarPath(
   start,
   end,
   bounds,
-  options = { gridSize: 100 }
+  options = { gridSize: 100, heuristic: "haversine" }
 ) {
-  console.log("A* calculation starting with:", { start, end, options });
+  console.log("A* calculation starting with:", {
+    start,
+    end,
+    heuristic: options.heuristic || "haversine",
+    options,
+  });
+
+  // Reset landmark distances cache when starting a new search
+  if (options.heuristic === "landmark") {
+    landmarkDistances = {};
+  }
+
+  // Select heuristic function
+  const heuristicName = options.heuristic || "haversine";
+  const heuristicFunc = heuristics[heuristicName] || heuristics.haversine;
+
+  console.log(`Using ${heuristicName} heuristic`);
 
   try {
     // Step 1: Get the cached Seattle graph
@@ -55,28 +256,36 @@ export async function calculateAStarPath(
       );
     }
 
-    // Step 3: Run A* algorithm on the street graph
-    const result = runAStarOnStreetGraph(graph, startNode, endNode);
+    // Step 3: Run A* algorithm on the street graph with selected heuristic
+    const result = runAStarOnStreetGraph(
+      graph,
+      startNode,
+      endNode,
+      heuristicFunc
+    );
     console.log(
-      `A* result: ${result.path.length} points, ${result.nodesExplored} nodes explored`
+      `A* result (${heuristicName}): ${result.path.length} points, ${result.nodesExplored} nodes explored`
     );
 
     // Check if we got a valid result
     if (result && result.path && result.path.length >= 3) {
-      console.log("Using A* result with street data");
-      return convertAStarToOSRMFormat(result);
+      console.log(`Using A* result with ${heuristicName} heuristic`);
+      const formattedResult = convertAStarToOSRMFormat(result);
+      formattedResult.routes[0].heuristic = heuristicName; // Add heuristic info
+      return formattedResult;
     } else {
       console.warn(
-        "A* street search produced insufficient path, falling back to grid"
+        `A* street search with ${heuristicName} heuristic produced insufficient path, falling back to grid`
       );
       throw new Error("A* found a too-short path");
     }
   } catch (error) {
-    console.error("Error in A* with street data:", error);
+    console.error(`Error in A* with ${heuristicName} heuristic:`, error);
     console.log("Falling back to grid-based A*");
 
     const gridResult = await fallbackGridBasedAStar(start, end, bounds, {
       gridSize: Math.max(options.gridSize, 500),
+      heuristic: options.heuristic,
     });
 
     return convertAStarToOSRMFormat(gridResult);
@@ -89,9 +298,15 @@ export async function calculateAStarPath(
  * @param {Array} graph - Array of nodes from buildStreetGraph
  * @param {Object} startNode - Starting node from the graph
  * @param {Object} endNode - Ending node from the graph
+ * @param {Function} heuristicFunc - The heuristic function to use
  * @returns {Object} Path and metrics from the A* algorithm
  */
-export function runAStarOnStreetGraph(graph, startNode, endNode) {
+export function runAStarOnStreetGraph(
+  graph,
+  startNode,
+  endNode,
+  heuristicFunc = heuristics.haversine
+) {
   // Create a map for faster node lookup by ID
   const nodeMap = {};
   for (const node of graph) {
@@ -110,7 +325,7 @@ export function runAStarOnStreetGraph(graph, startNode, endNode) {
 
   // Initialize with start node
   gScore[startNode.id] = 0;
-  fScore[startNode.id] = heuristicDistance(startNode, endNode);
+  fScore[startNode.id] = heuristicFunc(startNode, endNode);
   openSet.enqueue({ id: startNode.id, f: fScore[startNode.id] });
 
   // Track statistics
@@ -206,7 +421,7 @@ export function runAStarOnStreetGraph(graph, startNode, endNode) {
         gScore[neighborId] = tentativeGScore;
 
         // Calculate f-score (g + heuristic)
-        const h = heuristicDistance(neighborNode, endNode);
+        const h = heuristicFunc(neighborNode, endNode);
         fScore[neighborId] = tentativeGScore + h;
 
         // Add to open set if not there already

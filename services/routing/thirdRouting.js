@@ -23,11 +23,12 @@ export async function calculateThirdRoute(
   start,
   end,
   bounds,
-  options = { gridSize: 100 }
+  options = { gridSize: 100, heuristic: "haversine" }
 ) {
   console.log("Third route calculation starting with:", {
     start,
     end,
+    heuristic: options.heuristic || "haversine",
     options,
   });
 
