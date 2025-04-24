@@ -6,7 +6,7 @@ We aim to develop an intelligent route planning and scheduling system for delive
 
 ---
 
-##Team Roles 
+#Team Members & Roles 
 
 Chance: Project Manager 
 
@@ -45,3 +45,5 @@ cd project-4-lost
 # 2. Run the program
 npm install
 npm run dev
+
+#3 Go to http://localhost:3000/
