@@ -1,4 +1,4 @@
-import { fetchStreetData, buildStreetGraph } from "./routingService.js";
+import { fetchStreetData, buildStreetGraph } from "./routing/graphUtils.js";
 
 // Cache for the Seattle street graph
 let cachedGraph = null;

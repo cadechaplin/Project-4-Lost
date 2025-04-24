@@ -89,7 +89,7 @@ import {
   getOpenStreetMapDirections,
   calculateAStarPath,
   calculateThirdRoute,
-} from "../services/routingService";
+} from "../services/routing/index.js";
 import { decodePolyline } from "../services/geoUtils";
 import waterBodies from "../data/waterBodies.json";
 // Import child components
