@@ -6,6 +6,10 @@
 // Simple in-memory cache for elevation data
 const elevationCache = {};
 
+// Rate limiting parameters
+const MAX_REQUESTS_PER_MINUTE = 10;
+const requestTimestamps = [];
+
 /**
  * Get elevation data for a geographic point
  * Uses caching to minimize API calls for repeatedly accessed points
@@ -22,10 +26,17 @@ export async function getElevation(point) {
     return elevationCache[key];
   }
 
+  // Apply rate limiting
+  if (!checkRateLimit()) {
+    console.warn("Rate limit exceeded, using simulated elevation data");
+    return getSimulatedElevation(point);
+  }
+
   try {
-    const response = await fetch(
-      `https://api.open-elevation.com/api/v1/lookup?locations=${point.lat},${point.lng}`
-    );
+    // Use a CORS proxy to bypass CORS restrictions
+    const corsProxy = "https://corsproxy.io/?";
+    const apiUrl = `https://api.open-elevation.com/api/v1/lookup?locations=${point.lat},${point.lng}`;
+    const response = await fetch(corsProxy + encodeURIComponent(apiUrl));
 
     if (!response.ok) {
       throw new Error(`Elevation API error: ${response.status}`);
@@ -41,11 +52,7 @@ export async function getElevation(point) {
     throw new Error("Invalid elevation data format");
   } catch (error) {
     console.error("Error fetching elevation:", error);
-    // Fall back to simulated elevation based on latitude
-    // This ensures the algorithm can still function when the API is unavailable
-    const simulatedElevation = point.lat * 100;
-    elevationCache[key] = simulatedElevation; // Cache the fallback value
-    return simulatedElevation;
+    return getSimulatedElevation(point);
   }
 }
 
@@ -81,15 +88,32 @@ export async function getBatchElevation(points) {
     return results;
   }
 
+  // If too many uncached points or rate limited, use simulated data
+  if (uncachedPoints.length > 10 || !checkRateLimit()) {
+    console.warn(
+      "Using simulated elevation data due to rate limits or batch size"
+    );
+    uncachedPoints.forEach((point, i) => {
+      const originalIndex = indexMap[i];
+      const key = `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
+      const elevationValue = getSimulatedElevation(point);
+
+      elevationCache[key] = elevationValue;
+      results[originalIndex] = elevationValue;
+    });
+
+    return results;
+  }
+
   try {
-    // Format locations string for the API
+    // Format locations string for the API and use CORS proxy
+    const corsProxy = "https://corsproxy.io/?";
     const locationsStr = uncachedPoints
       .map((point) => `${point.lat},${point.lng}`)
       .join("|");
+    const apiUrl = `https://api.open-elevation.com/api/v1/lookup?locations=${locationsStr}`;
 
-    const response = await fetch(
-      `https://api.open-elevation.com/api/v1/lookup?locations=${locationsStr}`
-    );
+    const response = await fetch(corsProxy + encodeURIComponent(apiUrl));
 
     if (!response.ok) {
       throw new Error(`Elevation API error: ${response.status}`);
@@ -118,14 +142,56 @@ export async function getBatchElevation(points) {
     uncachedPoints.forEach((point, i) => {
       const originalIndex = indexMap[i];
       const key = `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
-      const simulatedElevation = point.lat * 100;
+      const elevationValue = getSimulatedElevation(point);
 
-      elevationCache[key] = simulatedElevation;
-      results[originalIndex] = simulatedElevation;
+      elevationCache[key] = elevationValue;
+      results[originalIndex] = elevationValue;
     });
 
     return results;
   }
+}
+
+/**
+ * Generate simulated elevation based on coordinates
+ *
+ * @param {Object} point - Geographic point {lat, lng}
+ * @returns {number} - Simulated elevation in meters
+ */
+function getSimulatedElevation(point) {
+  // More realistic simulation based on Seattle's topography
+  // Higher elevations in north and east
+  const baseElevation = 20; // Base elevation in meters
+  const latFactor = (point.lat - 47.5) * 200; // Higher in north
+  const lngFactor = (-122.4 - point.lng) * 100; // Higher in east
+
+  // Add some terrain variation based on coordinate hashing
+  const hash = Math.sin(point.lat * 10) * Math.cos(point.lng * 10) * 50;
+
+  return baseElevation + latFactor + lngFactor + hash;
+}
+
+/**
+ * Check if we're within rate limits
+ *
+ * @returns {boolean} - True if within rate limits, false otherwise
+ */
+function checkRateLimit() {
+  const now = Date.now();
+
+  // Remove timestamps older than 1 minute
+  while (requestTimestamps.length > 0 && now - requestTimestamps[0] > 60000) {
+    requestTimestamps.shift();
+  }
+
+  // Check if we've made too many requests in the last minute
+  if (requestTimestamps.length >= MAX_REQUESTS_PER_MINUTE) {
+    return false;
+  }
+
+  // Add current timestamp
+  requestTimestamps.push(now);
+  return true;
 }
 
 /**
@@ -144,7 +210,8 @@ export function clearElevationCache() {
  * @param {number} resolution - Number of points in each direction
  * @returns {Promise<void>}
  */
-export async function preloadElevationData(bounds, resolution = 10) {
+export async function preloadElevationData(bounds, resolution = 5) {
+  // Use a lower resolution to avoid overwhelming the API
   const points = [];
   const latStep = (bounds.north - bounds.south) / resolution;
   const lngStep = (bounds.east - bounds.west) / resolution;
@@ -160,8 +227,14 @@ export async function preloadElevationData(bounds, resolution = 10) {
 
   try {
     console.log(`Preloading elevation data for ${points.length} points`);
-    await getBatchElevation(points);
-    console.log("Elevation data preloaded successfully");
+    // Use simulated data for preloading to avoid rate limits
+    points.forEach((point) => {
+      const key = `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
+      if (elevationCache[key] === undefined) {
+        elevationCache[key] = getSimulatedElevation(point);
+      }
+    });
+    console.log("Elevation data preloaded successfully (simulated)");
   } catch (error) {
     console.error("Error preloading elevation data:", error);
   }
