@@ -3,7 +3,6 @@
  */
 
 import { calculateHaversineDistance, encodePolyline } from "../geoUtils.js";
-import waterBodies from "../../data/waterBodies.json";
 
 /**
  * Build a graph structure from OpenStreetMap data for use with A* algorithm
@@ -157,6 +156,7 @@ export function heuristicDistance(nodeA, nodeB) {
     return Infinity; // Return a large value to deprioritize this path
   }
 
+  // Remove any water-related penalty logic
   return calculateHaversineDistance(
     { lat: nodeA.lat, lng: nodeA.lng },
     { lat: nodeB.lat, lng: nodeB.lng }
@@ -182,43 +182,6 @@ export function reconstructPath(cameFrom, current, start, graph) {
   const startNode = graph.find((n) => n.id === start);
   path.unshift({ lat: startNode.lat, lng: startNode.lng });
   return path;
-}
-
-/**
- * Check if a point is inside any water body
- * @param {Object} point - {lat, lng} point to check
- * @returns {boolean} True if the point is inside a water body
- */
-export function isPointInWater(point) {
-  for (const feature of waterBodies.features) {
-    const polygon = feature.geometry.coordinates[0];
-    if (isPointInPolygon(point, polygon)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Check if a point is inside a polygon
- * @param {Object} point - {lat, lng} point to check
- * @param {Array} polygon - Array of [lng, lat] coordinates defining the polygon
- * @returns {boolean} True if the point is inside the polygon
- */
-export function isPointInPolygon(point, polygon) {
-  let inside = false;
-  const x = point.lng,
-    y = point.lat;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i][0],
-      yi = polygon[i][1];
-    const xj = polygon[j][0],
-      yj = polygon[j][1];
-    const intersect =
-      yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
 }
 
 /**

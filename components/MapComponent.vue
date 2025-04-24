@@ -91,21 +91,10 @@ import {
   calculateThirdRoute,
 } from "../services/routing/index.js";
 import { decodePolyline } from "../services/geoUtils";
-import waterBodies from "../data/waterBodies.json";
 // Import child components
 import PointSelector from "./PointSelector.vue";
 import RouteInfo from "./RouteInfo.vue";
 import { getSeattleGraph } from "../services/graphCache.js";
-
-function addWaterLayer(map, L) {
-  L.geoJSON(waterBodies, {
-    style: {
-      color: "#0000FF",
-      weight: 1,
-      fillOpacity: 0.2,
-    },
-  }).addTo(map);
-}
 
 export default {
   // Register child components
@@ -192,9 +181,6 @@ export default {
         console.log("Map initialized successfully");
         mapLoaded.value = true;
         loadingStatus.value = "Map loaded successfully";
-
-        // Add water layer to the map
-        addWaterLayer(map.value, L.value);
 
         // Force a map resize after it becomes visible for proper rendering
         setTimeout(() => {
