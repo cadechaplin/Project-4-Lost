@@ -88,11 +88,23 @@ import {
 import {
   getOpenStreetMapDirections,
   calculateAStarPath,
+  calculateThirdRoute,
 } from "../services/routingService";
 import { decodePolyline } from "../services/geoUtils";
+import waterBodies from "../data/waterBodies.json";
 // Import child components
 import PointSelector from "./PointSelector.vue";
 import RouteInfo from "./RouteInfo.vue";
+
+function addWaterLayer(map, L) {
+  L.geoJSON(waterBodies, {
+    style: {
+      color: "#0000FF",
+      weight: 1,
+      fillOpacity: 0.2,
+    },
+  }).addTo(map);
+}
 
 export default {
   // Register child components
@@ -103,20 +115,21 @@ export default {
   setup() {
     // Map initialization and state refs
     const mapLoaded = ref(false);
-    const mapRef = ref(null);         // DOM reference to map container
-    const map = ref(null);            // Leaflet map instance
-    const leafletMarkers = ref([]);   // Markers added to the map
+    const mapRef = ref(null); // DOM reference to map container
+    const map = ref(null); // Leaflet map instance
+    const leafletMarkers = ref([]); // Markers added to the map
     const leafletPolylines = ref([]); // Route polylines added to the map
     const loadingStatus = ref("Initializing..."); // Map loading status message
-    const L = ref(null);              // Leaflet library reference
+    const L = ref(null); // Leaflet library reference
 
     // Route planning state refs
-    const points = ref([]);           // User-selected geographic points
-    const markers = ref([]);          // Marker data for rendering
-    const path = ref([]);             // OSRM route path points
-    const aStarPath = ref([]);        // A* algorithm route path points
-    const isLoading = ref(false);     // Loading state for route calculation
-    const routeInfo = ref(null);      // Route comparison information
+    const points = ref([]); // User-selected geographic points
+    const markers = ref([]); // Marker data for rendering
+    const path = ref([]); // OSRM route path points
+    const aStarPath = ref([]); // A* algorithm route path points
+    const thirdRoutePath = ref([]); // Third route path points
+    const isLoading = ref(false); // Loading state for route calculation
+    const routeInfo = ref(null); // Route comparison information
 
     // Seattle geographic boundaries (used to constrain point selection)
     const SEATTLE_BOUNDS = {
@@ -178,6 +191,9 @@ export default {
         console.log("Map initialized successfully");
         mapLoaded.value = true;
         loadingStatus.value = "Map loaded successfully";
+
+        // Add water layer to the map
+        addWaterLayer(map.value, L.value);
 
         // Force a map resize after it becomes visible for proper rendering
         setTimeout(() => {
@@ -263,6 +279,7 @@ export default {
       console.log("Updating paths:", {
         osmPath: path.value.length,
         aStarPath: aStarPath.value.length,
+        thirdRoutePath: thirdRoutePath.value.length,
       });
 
       // Clear existing polylines
@@ -313,6 +330,33 @@ export default {
         console.warn("No A* path points to display");
       }
 
+      // Add third route polyline (green solid line)
+      if (thirdRoutePath.value.length > 0) {
+        console.log(
+          "Drawing third route path with",
+          thirdRoutePath.value.length,
+          "points"
+        );
+        const thirdRoutePolyline = addPolylineToMap(
+          map.value,
+          thirdRoutePath.value,
+          {
+            color: "#34A853", // Google green
+            weight: 5,
+            opacity: 0.8,
+          }
+        );
+
+        if (thirdRoutePolyline) {
+          console.log("Third route polyline added to map");
+          leafletPolylines.value.push(thirdRoutePolyline);
+        } else {
+          console.error("Failed to add third route polyline to map");
+        }
+      } else {
+        console.warn("No third route path points to display");
+      }
+
       // Ensure the map redraws correctly
       if (map.value) {
         map.value.invalidateSize();
@@ -323,6 +367,7 @@ export default {
     watch(() => markers.value, updateMarkers, { deep: true });
     watch(() => path.value, updatePaths, { deep: true });
     watch(() => aStarPath.value, updatePaths, { deep: true });
+    watch(() => thirdRoutePath.value, updatePaths, { deep: true });
 
     /**
      * Handle user clicking on the map to select a point
@@ -358,6 +403,7 @@ export default {
       markers.value = [];
       path.value = [];
       aStarPath.value = [];
+      thirdRoutePath.value = [];
       routeInfo.value = null;
     }
 
@@ -374,6 +420,7 @@ export default {
       isLoading.value = true;
       path.value = [];
       aStarPath.value = [];
+      thirdRoutePath.value = [];
       routeInfo.value = null;
       clearLeafletMarkers(); // Clear previous markers
 
@@ -389,62 +436,102 @@ export default {
           const from = points.value[i];
           const to = points.value[i + 1];
 
-          console.log(`Calculating route from point ${i + 1} to point ${i + 2}`);
+          console.log(
+            `Calculating route from point ${i + 1} to point ${i + 2}`
+          );
 
-        // Get OSRM route for the blue line
-        const osrmSegment = await getOpenStreetMapDirections(from, to);
-        if (osrmSegment?.routes?.[0]) {
-          const segment = osrmSegment.routes[0];
-          const segmentPath = decodePolyline(segment.overview_polyline.points);
-          path.value.push(...segmentPath);
+          // Get OSRM route for the blue line
+          const osrmSegment = await getOpenStreetMapDirections(from, to);
+          if (osrmSegment?.routes?.[0]) {
+            const segment = osrmSegment.routes[0];
+            const segmentPath = decodePolyline(
+              segment.overview_polyline.points
+            );
+            path.value.push(...segmentPath);
 
-          // Add segment metrics to totals
-          totalOSMDistance += segment.legs[0].distance.value;
-          totalOSMDuration += segment.legs[0].duration.value;
+            // Add segment metrics to totals
+            totalOSMDistance += segment.legs[0].distance.value;
+            totalOSMDuration += segment.legs[0].duration.value;
+          }
+
+          // Get A* route with optimized boundaries around the segment
+          const padding = 0.005; // ~500m padding
+          const smallerBounds = {
+            south: Math.max(
+              Math.min(from.lat, to.lat) - padding,
+              SEATTLE_BOUNDS.south
+            ),
+            north: Math.min(
+              Math.max(from.lat, to.lat) + padding,
+              SEATTLE_BOUNDS.north
+            ),
+            west: Math.max(
+              Math.min(from.lng, to.lng) - padding,
+              SEATTLE_BOUNDS.west
+            ),
+            east: Math.min(
+              Math.max(from.lng, to.lng) + padding,
+              SEATTLE_BOUNDS.east
+            ),
+          };
+
+          // Calculate A* path for this segment
+          const aStarSegment = await calculateAStarPath(
+            from,
+            to,
+            smallerBounds
+          );
+          if (aStarSegment?.routes?.[0]) {
+            const segment = aStarSegment.routes[0];
+            const segmentPath = decodePolyline(
+              segment.overview_polyline.points
+            );
+            aStarPath.value.push(...segmentPath);
+
+            // Add A* metrics to totals
+            totalAStarDistance += segment?.legs?.[0]?.distance?.value || 0;
+            totalNodesExplored += segment?.nodesExplored || 0;
+          } else {
+            console.warn(
+              "A* failed for segment. Falling back to OSRM path segment."
+            );
+            aStarPath.value.push(...path.value);
+          }
+
+          // Calculate third route for this segment
+          const thirdRouteSegment = await calculateThirdRoute(
+            from,
+            to,
+            smallerBounds
+          );
+          if (thirdRouteSegment?.routes?.[0]) {
+            const segment = thirdRouteSegment.routes[0];
+            const segmentPath = decodePolyline(
+              segment.overview_polyline.points
+            );
+            thirdRoutePath.value.push(...segmentPath);
+          } else {
+            console.warn("Third route failed for segment.");
+          }
         }
 
-        // Get A* route with optimized boundaries around the segment
-        const padding = 0.005; // ~500m padding
-        const smallerBounds = {
-          south: Math.max(Math.min(from.lat, to.lat) - padding, SEATTLE_BOUNDS.south),
-          north: Math.min(Math.max(from.lat, to.lat) + padding, SEATTLE_BOUNDS.north),
-          west: Math.max(Math.min(from.lng, to.lng) - padding, SEATTLE_BOUNDS.west),
-          east: Math.min(Math.max(from.lng, to.lng) + padding, SEATTLE_BOUNDS.east),
+        // Create the route info object for display
+        routeInfo.value = {
+          osmDistance: (totalOSMDistance / 1000).toFixed(2) + " km",
+          osmDuration: (totalOSMDuration / 60).toFixed(2) + " min",
+          aStarDistance: (totalAStarDistance / 1000).toFixed(2) + " km",
+          nodesExplored: totalNodesExplored,
         };
 
-        // Calculate A* path for this segment
-        const aStarSegment = await calculateAStarPath(from, to, smallerBounds);
-        if (aStarSegment?.routes?.[0]) {
-          const segment = aStarSegment.routes[0];
-          const segmentPath = decodePolyline(segment.overview_polyline.points);
-          aStarPath.value.push(...segmentPath);
-
-          // Add A* metrics to totals
-          totalAStarDistance += segment?.legs?.[0]?.distance?.value || 0;
-          totalNodesExplored += segment?.nodesExplored || 0;
-        } else {
-          console.warn("A* failed for segment. Falling back to OSRM path segment.");
-          aStarPath.value.push(...path.value);
-        }
+        // Wait for Vue to update before redrawing paths
+        await nextTick();
+        updatePaths();
+      } catch (error) {
+        console.error("Error calculating routes:", error);
+        alert("Error calculating routes. Please try again.");
+      } finally {
+        isLoading.value = false;
       }
-
-      // Create the route info object for display
-      routeInfo.value = {
-        osmDistance: (totalOSMDistance / 1000).toFixed(2) + " km",
-        osmDuration: (totalOSMDuration / 60).toFixed(2) + " min",
-        aStarDistance: (totalAStarDistance / 1000).toFixed(2) + " km",
-        nodesExplored: totalNodesExplored,
-      };
-
-      // Wait for Vue to update before redrawing paths
-      await nextTick();
-      updatePaths();
-    } catch (error) {
-      console.error("Error calculating routes:", error);
-      alert("Error calculating routes. Please try again.");
-    } finally {
-      isLoading.value = false;
-    }
     }
 
     /**
@@ -469,6 +556,7 @@ export default {
       markers,
       path,
       aStarPath,
+      thirdRoutePath,
       isLoading,
       routeInfo,
       handlePointSelection,

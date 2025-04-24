@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-122.335167, 47.609722],
+            [-122.335167, 47.62],
+            [-122.32, 47.62],
+            [-122.32, 47.609722],
+            [-122.335167, 47.609722]
+          ]
+        ]
+      },
+      "properties": {
+        "name": "Lake Union"
+      }
+    }
+  ]
+}
